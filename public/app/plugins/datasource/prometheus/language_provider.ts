@@ -15,7 +15,7 @@ const DEFAULT_KEYS = ['job', 'instance'];
 const EMPTY_SELECTOR = '{}';
 const HISTORY_ITEM_COUNT = 5;
 const HISTORY_COUNT_CUTOFF = 1000 * 60 * 60 * 24; // 24h
-export const DEFAULT_LOOKUP_METRICS_THRESHOLD = 10000; // number of metrics defining an installation that's too big
+export const DEFAULT_LOOKUP_METRICS_THRESHOLD = 100000; // number of metrics defining an installation that's too big
 
 const wrapLabel = (label: string): CompletionItem => ({ label });
 
@@ -58,6 +58,7 @@ export default class PromQlLanguageProvider extends LanguageProvider {
   timeRange?: { start: number; end: number };
   metrics?: string[];
   metricsMetadata?: PromMetricsMetadata;
+  metricsWithMetadata: CompletionItem[];
   startTask: Promise<any>;
   datasource: PrometheusDatasource;
   lookupMetricsThreshold: number;
@@ -111,10 +112,52 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     return defaultValue;
   };
 
+  requestNew(url: string, hasObjectResponse?: false): Promise<string[]>;
+  requestNew(url: string, hasObjectResponse?: true): Promise<PromMetricsMetadata>;
+  requestNew(url: string, hasObjectResponse?: boolean): Promise<string[] | PromMetricsMetadata>;
+  requestNew(url: string, hasObjectResponse = false): Promise<string[] | PromMetricsMetadata> {
+    return new Promise(resolve => {
+      let nodes: string[] | PromMetricsMetadata = hasObjectResponse ? {} : [];
+      const streamWorker = new Worker('./workers/streamJSONResponse', { name: 'streamJSONResponse', type: 'module' });
+
+      streamWorker.onmessage = e => {
+        if (e.data === 'DONE') {
+          // IMPORTANT - releases about 500 MB RAM immediately!
+          // Presumably because oboe.js builds an object internally and it doesn't get GC'ed
+          streamWorker.terminate();
+          resolve(nodes);
+        }
+
+        if (Array.isArray(nodes)) {
+          nodes = nodes.concat(e.data);
+        } else {
+          Object.assign(nodes, e.data);
+        }
+      };
+
+      streamWorker.onerror = error => {
+        console.error(error);
+        resolve(nodes);
+      };
+
+      streamWorker.postMessage({
+        url,
+      });
+    });
+  }
+
   start = async (): Promise<any[]> => {
-    this.metrics = await this.request('/api/v1/label/__name__/values', []);
+    const [metrics, metricsMetadata] = await Promise.all([
+      this.requestNew('http://localhost:9099/api/v1/label/__name__/values'),
+      this.requestNew('http://localhost:9099/api/v1/metadata', true),
+    ]);
+    this.metrics = metrics;
+    this.metricsMetadata = metricsMetadata;
+
+    // this.metrics = await this.request('/api/v1/label/__name__/values', []);
     this.lookupsDisabled = this.metrics.length > this.lookupMetricsThreshold;
-    this.metricsMetadata = await this.request('/api/v1/metadata', {});
+    // this.metricsMetadata = await this.request('/api/v1/metadata', {});
+    this.metricsWithMetadata = this.metrics.map(m => addMetricsMetadata(m, this.metricsMetadata));
     this.processHistogramMetrics(this.metrics);
     return [];
   };
@@ -211,7 +254,7 @@ export default class PromQlLanguageProvider extends LanguageProvider {
   };
 
   getTermCompletionItems = (): TypeaheadOutput => {
-    const { metrics, metricsMetadata } = this;
+    const { metrics } = this;
     const suggestions = [];
 
     suggestions.push({
@@ -223,7 +266,7 @@ export default class PromQlLanguageProvider extends LanguageProvider {
     if (metrics && metrics.length) {
       suggestions.push({
         label: 'Metrics',
-        items: metrics.map(m => addMetricsMetadata(m, metricsMetadata)),
+        items: this.metricsWithMetadata,
       });
     }
 

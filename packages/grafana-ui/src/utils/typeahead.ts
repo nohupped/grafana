@@ -3,14 +3,22 @@ import { CompletionItemGroup, CompletionItem, CompletionItemKind } from '../type
 import { GrafanaTheme } from '@grafana/data';
 
 export const flattenGroupItems = (groupedItems: CompletionItemGroup[]): CompletionItem[] => {
-  return groupedItems.reduce((all: CompletionItem[], { items, label }) => {
+  // console.log(groupedItems);
+  const processed = groupedItems.reduce((all: CompletionItem[], { items, label }) => {
     const titleItem: CompletionItem = {
       label,
       kind: CompletionItemKind.GroupTitle,
     };
-    all.push(titleItem, ...items);
+
+    all.push(titleItem);
+    for (const item of items) {
+      all.push(item);
+    }
+    // all.push(titleItem, ...items);
     return all;
   }, []);
+  // console.log(processed);
+  return processed;
 };
 
 export const calculateLongestLabel = (allItems: CompletionItem[]): string => {
