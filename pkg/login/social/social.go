@@ -176,6 +176,7 @@ func NewOAuthService() {
 				SocialBase:        newSocialBase(name, &config, info),
 				apiUrl:            info.ApiUrl,
 				allowedGroups:     util.SplitString(sec.Key("allowed_groups").String()),
+				groupMappings:     info.GroupMappings,
 				roleAttributePath: info.RoleAttributePath,
 			}
 		}

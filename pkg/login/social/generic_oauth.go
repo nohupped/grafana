@@ -9,6 +9,8 @@ import (
 	"net/mail"
 	"regexp"
 
+	"github.com/grafana/grafana/pkg/infra/log"
+
 	"github.com/grafana/grafana/pkg/util/errutil"
 
 	"github.com/grafana/grafana/pkg/models"
@@ -25,6 +27,14 @@ type SocialGenericOAuth struct {
 	roleAttributePath    string
 	groupMappings        []setting.OAuthGroupMapping
 	teamIds              []int
+}
+
+func (s *SocialGenericOAuth) getLogger() log.Logger {
+	return s.SocialBase.log
+}
+
+func (s *SocialGenericOAuth) getGroupsMapping() []setting.OAuthGroupMapping {
+	return s.groupMappings
 }
 
 func (s *SocialGenericOAuth) Type() int {
@@ -84,6 +94,10 @@ type UserInfoJson struct {
 	rawJSON     []byte
 }
 
+func (u *UserInfoJson) getRawJson() []byte {
+	return u.rawJSON
+}
+
 func (info *UserInfoJson) String() string {
 	return fmt.Sprintf(
 		"Name: %s, Displayname: %s, Login: %s, Username: %s, Email: %s, Upn: %s, Attributes: %v",
@@ -140,7 +154,7 @@ func (s *SocialGenericOAuth) fillUserInfo(userInfo *BasicUserInfo, data *UserInf
 		}
 	}
 	if userInfo.GroupMappings == nil {
-		groupMappings, err := s.extractGroupMappings(data)
+		groupMappings, err := extractGroupMappings(s, data)
 		if err != nil {
 			s.log.Error("Failed to extract group mappings", "error", err)
 		} else {
@@ -247,29 +261,6 @@ func (s *SocialGenericOAuth) extractRole(data *UserInfoJson) (string, error) {
 		return "", err
 	}
 	return role, nil
-}
-
-func (s *SocialGenericOAuth) extractGroupMappings(data *UserInfoJson) ([]setting.OAuthGroupMapping, error) {
-	var groupMappings []setting.OAuthGroupMapping
-	if s.groupMappings == nil {
-		return nil, nil
-	}
-
-	for _, mapping := range s.groupMappings {
-		role, err := s.searchJSONForAttr(mapping.RoleAttributePath, data.rawJSON)
-		if err != nil {
-			s.log.Error("Failed to get role_attribute_path", "error", err)
-			continue
-		}
-		if role == "" {
-			s.log.Debug(fmt.Sprintf("role_attribute_path did not produce a role: %s", mapping.RoleAttributePath))
-			continue
-		}
-		mapping.Role = role
-		groupMappings = append(groupMappings, mapping)
-	}
-
-	return groupMappings, nil
 }
 
 func (s *SocialGenericOAuth) extractLogin(data *UserInfoJson) string {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/grafana/grafana/pkg/infra/log"
+	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util/errutil"
 	"github.com/jmespath/go-jmespath"
 )
@@ -95,4 +96,38 @@ func (s *SocialBase) searchJSONForAttr(attributePath string, data []byte) (strin
 	}
 
 	return "", nil
+}
+
+type socialMappingExtractor interface {
+	getLogger() log.Logger
+	getGroupsMapping() []setting.OAuthGroupMapping
+	searchJSONForAttr(string, []byte) (string, error)
+}
+
+type rawJsonExtractor interface {
+	getRawJson() []byte
+}
+
+func extractGroupMappings(s socialMappingExtractor, data rawJsonExtractor) ([]setting.OAuthGroupMapping, error) {
+	var groupMappings []setting.OAuthGroupMapping
+	if s.getGroupsMapping() == nil {
+		return nil, nil
+	}
+	l := s.getLogger()
+
+	for _, mapping := range s.getGroupsMapping() {
+		role, err := s.searchJSONForAttr(mapping.RoleAttributePath, data.getRawJson())
+		if err != nil {
+			l.Error("Failed to get role_attribute_path", "error", err)
+			continue
+		}
+		if role == "" {
+			l.Debug(fmt.Sprintf("role_attribute_path did not produce a role: %s", mapping.RoleAttributePath))
+			continue
+		}
+		mapping.Role = role
+		groupMappings = append(groupMappings, mapping)
+	}
+
+	return groupMappings, nil
 }

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/grafana/grafana/pkg/infra/log"
 	"github.com/grafana/grafana/pkg/models"
+
 	"github.com/grafana/grafana/pkg/setting"
 	"github.com/grafana/grafana/pkg/util/errutil"
 	"golang.org/x/oauth2"
@@ -33,11 +35,23 @@ type OktaUserInfoJson struct {
 	rawJSON     []byte
 }
 
+func (o *OktaUserInfoJson) getRawJson() []byte {
+	return o.rawJSON
+}
+
 type OktaClaims struct {
 	ID                string `json:"sub"`
 	Email             string `json:"email"`
 	PreferredUsername string `json:"preferred_username"`
 	Name              string `json:"name"`
+}
+
+func (s *SocialOkta) getLogger() log.Logger {
+	return s.SocialBase.log
+}
+
+func (s *SocialOkta) getGroupsMapping() []setting.OAuthGroupMapping {
+	return s.groupMappings
 }
 
 func (claims *OktaClaims) extractEmail() string {
@@ -50,29 +64,6 @@ func (claims *OktaClaims) extractEmail() string {
 
 func (s *SocialOkta) Type() int {
 	return int(models.OKTA)
-}
-
-func (s *SocialOkta) extractGroupMappings(data *OktaUserInfoJson) ([]setting.OAuthGroupMapping, error) {
-	var groupMappings []setting.OAuthGroupMapping
-	if s.groupMappings == nil {
-		return nil, nil
-	}
-
-	for _, mapping := range s.groupMappings {
-		role, err := s.searchJSONForAttr(mapping.RoleAttributePath, data.rawJSON)
-		if err != nil {
-			s.log.Error("Failed to get role_attribute_path", "error", err)
-			continue
-		}
-		if role == "" {
-			s.log.Debug(fmt.Sprintf("role_attribute_path did not produce a role: %s", mapping.RoleAttributePath))
-			continue
-		}
-		mapping.Role = role
-		groupMappings = append(groupMappings, mapping)
-	}
-
-	return groupMappings, nil
 }
 
 func (s *SocialOkta) UserInfo(client *http.Client, token *oauth2.Token) (*BasicUserInfo, error) {
@@ -111,7 +102,7 @@ func (s *SocialOkta) UserInfo(client *http.Client, token *oauth2.Token) (*BasicU
 	if !s.IsGroupMember(groups) {
 		return nil, ErrMissingGroupMembership
 	}
-	groupMappings, err := s.extractGroupMappings(&data)
+	groupMappings, err := extractGroupMappings(s, &data)
 	if err != nil {
 		s.log.Error("Failed to extract group mappings", "error", err)
 	}
